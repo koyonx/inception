@@ -80,6 +80,10 @@ line with `make LOGIN=wil`.
 More detail: [`USER_DOC.md`](USER_DOC.md) for day-to-day usage,
 [`DEV_DOC.md`](DEV_DOC.md) for the build and the internals.
 
+Japanese notes (日本語): [`docs/SPEC.ja.md`](docs/SPEC.ja.md) is a detailed
+specification of every service, and [`docs/KNOWLEDGE.ja.md`](docs/KNOWLEDGE.ja.md)
+collects the background knowledge behind the design choices.
+
 ## Project description
 
 ### Use of Docker and sources included
