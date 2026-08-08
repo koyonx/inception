@@ -1,0 +1,15 @@
+# ---- Secrets: never commit anything containing a credential ----------------
+secrets/*.txt
+srcs/.env
+
+# ---- Generated / local -------------------------------------------------------
+*.log
+*.bak
+.DS_Store
+
+# ---- Subject ------------------------------------------------------------------
+en.subject*.pdf
+
+# ---- Kept in the repository --------------------------------------------------
+!secrets/.gitkeep
+!srcs/.env.example

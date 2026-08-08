@@ -1,0 +1,229 @@
+# =============================================================================
+#  Inception - docker compose
+#  Mandatory : nginx (443 only) -> wordpress (php-fpm) -> mariadb
+#  Bonus     : redis, ftp, adminer, static-site, backup  (profile "bonus")
+# =============================================================================
+
+services:
+
+  # ------------------------------------------------------------------ MariaDB
+  mariadb:
+    build:
+      context: ./requirements/mariadb
+      dockerfile: Dockerfile
+    image: mariadb:inception
+    container_name: mariadb
+    env_file: .env
+    secrets:
+      - db_password
+      - db_root_password
+    volumes:
+      - mariadb:/var/lib/mysql
+    networks:
+      - inception
+    expose:
+      - "3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping --silent -h localhost -u root -p\"$$(cat /run/secrets/db_root_password)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: always
+
+  # ---------------------------------------------------------- WordPress + PHP
+  wordpress:
+    build:
+      context: ./requirements/wordpress
+      dockerfile: Dockerfile
+    image: wordpress:inception
+    container_name: wordpress
+    env_file: .env
+    secrets:
+      - db_password
+      - credentials
+    volumes:
+      - wordpress:/var/www/html
+    networks:
+      - inception
+    expose:
+      - "9000"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep php-fpm > /dev/null && test -f /var/www/html/wp-config.php"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: always
+
+  # -------------------------------------------------------------------- NGINX
+  nginx:
+    build:
+      context: ./requirements/nginx
+      dockerfile: Dockerfile
+    image: nginx:inception
+    container_name: nginx
+    env_file: .env
+    volumes:
+      - wordpress:/var/www/html:ro
+    networks:
+      - inception
+    ports:
+      - "443:443"
+    depends_on:
+      - wordpress
+    healthcheck:
+      test: ["CMD-SHELL", "curl -kfsS https://localhost/ -o /dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: always
+
+  # ============================== BONUS ======================================
+
+  # ------------------------------------------------- Redis object cache (WP)
+  redis:
+    build:
+      context: ./requirements/bonus/redis
+      dockerfile: Dockerfile
+    image: redis:inception
+    container_name: redis
+    env_file: .env
+    volumes:
+      - redis:/data
+    networks:
+      - inception
+    expose:
+      - "6379"
+    profiles: ["bonus"]
+    restart: always
+
+  # ------------------------------- FTP server on the WordPress website volume
+  ftp:
+    build:
+      context: ./requirements/bonus/ftp
+      dockerfile: Dockerfile
+    image: ftp:inception
+    container_name: ftp
+    env_file: .env
+    secrets:
+      - ftp_password
+    volumes:
+      - wordpress:/var/www/html
+    networks:
+      - inception
+    ports:
+      - "21:21"
+      - "21000-21010:21000-21010"
+    profiles: ["bonus"]
+    restart: always
+
+  # ------------------------------------------------------ Adminer (DB client)
+  adminer:
+    build:
+      context: ./requirements/bonus/adminer
+      dockerfile: Dockerfile
+    image: adminer:inception
+    container_name: adminer
+    env_file: .env
+    networks:
+      - inception
+    expose:
+      - "8080"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    profiles: ["bonus"]
+    restart: always
+
+  # -------------------------------------------- Static showcase site (no PHP)
+  static-site:
+    build:
+      context: ./requirements/bonus/static-site
+      dockerfile: Dockerfile
+    image: static-site:inception
+    container_name: static-site
+    env_file: .env
+    networks:
+      - inception
+    expose:
+      - "8080"
+    profiles: ["bonus"]
+    restart: always
+
+  # ------------------------ Service of my choice: automatic database backups
+  backup:
+    build:
+      context: ./requirements/bonus/backup
+      dockerfile: Dockerfile
+    image: backup:inception
+    container_name: backup
+    env_file: .env
+    secrets:
+      - db_password
+    volumes:
+      - backup:/backups
+    networks:
+      - inception
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    profiles: ["bonus"]
+    restart: always
+
+# ----------------------------------------------------------------- networking
+networks:
+  inception:
+    name: inception
+    driver: bridge
+
+# ------------------------------------------------------------------- secrets
+secrets:
+  db_password:
+    file: ../secrets/db_password.txt
+  db_root_password:
+    file: ../secrets/db_root_password.txt
+  credentials:
+    file: ../secrets/credentials.txt
+  ftp_password:
+    file: ../secrets/ftp_password.txt
+
+# -------------------------------------------------------------------- volumes
+# Named volumes (no bind mount in the service definition); their data is
+# stored under ${DATA_PATH} = /home/<login>/data on the host machine.
+volumes:
+  mariadb:
+    name: mariadb
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_PATH}/mariadb
+
+  wordpress:
+    name: wordpress
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_PATH}/wordpress
+
+  redis:
+    name: redis
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_PATH}/redis
+
+  backup:
+    name: backup
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_PATH}/backup

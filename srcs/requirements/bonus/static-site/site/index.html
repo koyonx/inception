@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Inception — infrastructure overview</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <p class="kicker">42 · System Administration</p>
+    <h1>Inception</h1>
+    <p class="lead">
+      A small infrastructure of independent containers, built from scratch,
+      served behind a single TLS entrypoint.
+    </p>
+  </header>
+
+  <main>
+    <section>
+      <h2>Mandatory services</h2>
+      <ul class="cards">
+        <li>
+          <h3>nginx</h3>
+          <p>The only door in. Port <strong>443</strong>, TLSv1.2 / TLSv1.3
+             only, self-signed certificate.</p>
+        </li>
+        <li>
+          <h3>wordpress</h3>
+          <p>php-fpm listening on <strong>9000</strong>, no web server inside.
+             Installed and configured by wp-cli at first boot.</p>
+        </li>
+        <li>
+          <h3>mariadb</h3>
+          <p>Database on <strong>3306</strong>, never published on the host.
+             Bootstrapped from docker secrets.</p>
+        </li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Bonus services</h2>
+      <ul class="cards">
+        <li><h3>redis</h3><p>Object cache for WordPress.</p></li>
+        <li><h3>ftp</h3><p>vsftpd on the website volume.</p></li>
+        <li><h3>adminer</h3><p>Database client at <code>/adminer/</code>.</p></li>
+        <li><h3>static-site</h3><p>This page — HTML and CSS, no PHP.</p></li>
+        <li><h3>backup</h3><p>Nightly database dumps, kept on their own volume.</p></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Persistence</h2>
+      <p>
+        Two named volumes hold the state: one for the database, one for the
+        website files. Both live under <code>/home/&lt;login&gt;/data</code>
+        on the host, so destroying every container leaves the site intact.
+      </p>
+    </section>
+  </main>
+
+  <footer>
+    <p>Served by its own nginx container, proxied by the main one.</p>
+  </footer>
+</body>
+</html>
