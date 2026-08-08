@@ -1,0 +1,35 @@
+#
+# Inception - MariaDB server configuration
+#
+[server]
+
+[mysqld]
+user                    = mysql
+pid-file                = /run/mysqld/mysqld.pid
+socket                  = /run/mysqld/mysqld.sock
+basedir                 = /usr
+datadir                 = /var/lib/mysql
+tmpdir                  = /tmp
+lc-messages-dir         = /usr/share/mysql
+
+# Listen on every interface so the other containers of the docker network
+# (wordpress, adminer, backup) can reach the database. The port is never
+# published on the host: nginx:443 stays the only entrypoint.
+bind-address            = 0.0.0.0
+port                    = 3306
+skip-name-resolve
+
+# No `log_error` on purpose: when it is unset MariaDB writes to stderr, which
+# is exactly what `docker logs mariadb` reads.
+
+character-set-server    = utf8mb4
+collation-server        = utf8mb4_unicode_ci
+
+max_connections         = 100
+innodb_buffer_pool_size = 128M
+
+[embedded]
+
+[mariadb]
+
+[mariadb-10.11]
