@@ -7,6 +7,9 @@
 Inception is a system administration project: build a small, complete web
 infrastructure from scratch with Docker, and run it inside a virtual machine.
 
+This branch implements the **mandatory part only**: three services, nothing
+else.
+
 Nothing is pulled ready-made. Every image of this repository is built from a
 `Dockerfile` written here, on top of the penultimate stable Debian release
 (`debian:bookworm`), and every service runs in its own dedicated container:
@@ -21,10 +24,6 @@ Two Docker **named volumes** hold the state — one for the database, one for th
 website files — and both store their data under `/home/kkuramot/data` on the
 host. A dedicated bridge network (`inception`) connects the containers; neither
 `network: host` nor `links:` is used anywhere.
-
-A bonus layer adds five more containers: `redis` (object cache), `ftp`
-(vsftpd on the website volume), `adminer` (database client), `static-site`
-(a plain HTML/CSS showcase page) and `backup` (scheduled database dumps).
 
 ```
                         ┌──────────────── HOST ───────────────────────┐
@@ -64,11 +63,10 @@ passwords. The credentials are printed nowhere: read them with
 
 | Command         | Effect                                                    |
 |-----------------|-----------------------------------------------------------|
-| `make`          | build + start everything (mandatory **and** bonus)        |
-| `make mandatory`| build + start only nginx / wordpress / mariadb            |
+| `make`          | build + start nginx / wordpress / mariadb                 |
 | `make down`     | stop and remove the containers, keep the data             |
 | `make clean`    | the above + remove the images                             |
-| `make fclean`   | the above + remove the volumes and `/home/kkuramot/data`   |
+| `make fclean`   | the above + remove the volumes and `/home/kkuramot/data`  |
 | `make re`       | `fclean` then a full rebuild                              |
 | `make logs`     | follow the logs of every container                        |
 | `make ps`       | status of the containers                                  |
@@ -95,18 +93,17 @@ configuration files (`conf/`) and its entrypoint script (`tools/`).
 the `Makefile`.
 
 The sources fetched at build time are limited to what cannot be committed:
-the Debian packages (`apt`), the WordPress tarball and wp-cli, the
-`redis-cache` plugin, and the single Adminer PHP file. Their versions are
-pinned — the `latest` tag is used nowhere.
+the Debian packages (`apt`), the WordPress tarball and wp-cli. Their versions
+are pinned — the `latest` tag is used nowhere.
 
 ### Main design choices
 
 * **One process per container, and that process is PID 1.** Every entrypoint
-  ends with `exec`, so nginx, `mariadbd`, `php-fpm -F`, `redis-server`,
-  `vsftpd` and `cron -f` each receive the signals directly and shut down
-  cleanly. There is no `tail -f`, no `sleep infinity`, no `while true`
-  anywhere in this repository. The only loop is a *bounded* retry (30 attempts)
-  that waits for MariaDB before installing WordPress.
+  ends with `exec`, so nginx, `mariadbd` and `php-fpm -F` each receive the
+  signals directly and shut down cleanly. There is no `tail -f`, no
+  `sleep infinity`, no `while true` anywhere in this repository. The only loop
+  is a *bounded* retry (30 attempts) that waits for MariaDB before installing
+  WordPress.
 * **Idempotent entrypoints.** MariaDB initialises its data directory only when
   `/var/lib/mysql/mysql` is missing; WordPress installs itself only when
   `wp-config.php` is missing. Restarting a container never destroys data, and
@@ -119,10 +116,9 @@ pinned — the `latest` tag is used nowhere.
 * **TLS only.** nginx listens on 443 with `ssl_protocols TLSv1.2 TLSv1.3;`
   and nothing else. Port 80 is never opened. The certificate is self-signed
   for `kkuramot.42.fr` and generated on first start.
-* **Bonus behind the same door.** Adminer and the static site are proxied at
-  `/adminer/` and `/static/`, so the mandatory rule "nginx is the only
-  entrypoint" still holds. Only FTP needs its own published ports, which the
-  subject allows for the bonus part.
+* **Nothing beyond the mandatory scope.** Exactly three services, two named
+  volumes, one network, one published port. No bonus service is present, so
+  every moving part in this repository maps to a line of the subject.
 
 ### Virtual Machines vs Docker
 
@@ -134,8 +130,8 @@ and a fixed slice of RAM per VM.
 A container is just a group of processes on the **host kernel**, fenced off
 with namespaces (pid, net, mount, user…) and limited with cgroups. There is no
 guest kernel and no boot: starting a container is starting a process. That is
-why this whole infrastructure — six to nine services — fits comfortably inside
-a single small VM, whereas one VM per service would not.
+why these three services fit comfortably inside a single small VM, whereas one
+VM per service would not.
 
 The trade-off is the shared kernel: a container cannot run a different OS
 kernel, and a kernel-level escape affects the host. This project uses both
@@ -145,10 +141,9 @@ isolates the services from each other.
 ### Secrets vs Environment Variables
 
 Environment variables are convenient and are the right tool for
-*configuration*: the domain name, the database name, the user names, the redis
-host. They are visible in `docker inspect`, in `/proc/<pid>/environ`, and they
-are inherited by every child process — which makes them a poor place for a
-password.
+*configuration*: the domain name, the database name, the user names. They are
+visible in `docker inspect`, in `/proc/<pid>/environ`, and they are inherited
+by every child process — which makes them a poor place for a password.
 
 Docker secrets are mounted as read-only files under `/run/secrets/`, are not
 part of the image, are not shown by `docker inspect`, and are only readable
@@ -157,7 +152,7 @@ inside the container that declares them. In this project:
 * `srcs/.env` → non-sensitive configuration (`DOMAIN_NAME`, `MYSQL_DATABASE`,
   `MYSQL_USER`, `WP_ADMIN_USER`, …);
 * `secrets/*.txt` → every password (`db_root_password`, `db_password`,
-  `credentials`, `ftp_password`), read by the entrypoints with `cat`.
+  `credentials`), read by the entrypoints with `cat`.
 
 Both are git-ignored, and the passwords never appear in a `Dockerfile`, in a
 `docker history`, or in a build argument.
@@ -173,9 +168,9 @@ it.
 This project declares a user-defined bridge network, `inception`. Docker runs
 an embedded DNS server at `127.0.0.11`, so `wordpress` reaches the database by
 the name `mariadb` and nginx reaches php-fpm at `wordpress:9000`. Only the
-ports listed under `ports:` are published — `443` for nginx (plus the FTP
-ports in the bonus). MariaDB and php-fpm use `expose:` only: they are
-reachable from the network's containers and from nowhere else.
+ports listed under `ports:` are published — `443` for nginx, and nothing else.
+MariaDB and php-fpm use `expose:` only: they are reachable from the network's
+containers and from nowhere else.
 
 ### Docker Volumes vs Bind Mounts
 
@@ -185,13 +180,12 @@ and it is not a Docker object — `docker volume ls` does not know about it.
 
 A named volume is managed by Docker: it has a name, a lifecycle, a driver, and
 it survives `docker compose down`. This project uses named volumes
-(`mariadb`, `wordpress`, `redis`, `backup`) as the subject requires. Their data
-still has to land in `/home/kkuramot/data`, so each volume is declared with the
-`local` driver and `driver_opts` (`type: none`, `o: bind`,
-`device: ${DATA_PATH}/…`): the object stays a *named volume* — services mount
-it by name, `docker volume inspect wordpress` describes it — while its backing
-storage is the required host folder. No service definition contains a bind
-mount.
+(`mariadb`, `wordpress`) as the subject requires. Their data still has to land
+in `/home/kkuramot/data`, so each volume is declared with the `local` driver
+and `driver_opts` (`type: none`, `o: bind`, `device: ${DATA_PATH}/…`): the
+object stays a *named volume* — services mount it by name,
+`docker volume inspect wordpress` describes it — while its backing storage is
+the required host folder. No service definition contains a bind mount.
 
 ## Resources
 
@@ -202,12 +196,10 @@ mount.
 * [MariaDB Knowledge Base — `mariadb-install-db`, `--bootstrap`](https://mariadb.com/kb/en/mariadb-install-db/)
 * [WordPress Codex — `wp-config.php`](https://wordpress.org/documentation/article/editing-wp-config-php/)
   and [WP-CLI handbook](https://make.wordpress.org/cli/handbook/)
-* [nginx docs — `ssl_protocols`, `fastcgi_pass`, `proxy_pass`](https://nginx.org/en/docs/)
+* [nginx docs — `ssl_protocols`, `fastcgi_pass`](https://nginx.org/en/docs/)
 * [Mozilla SSL Configuration Generator](https://ssl-config.mozilla.org/) — the
   cipher suite used in `default.conf`
 * [php-fpm pool configuration](https://www.php.net/manual/en/install.fpm.configuration.php)
-* [vsftpd.conf(5)](https://security.appspot.com/vsftpd/vsftpd_conf.html)
-* [Redis configuration reference](https://redis.io/docs/latest/operate/oss_and_stack/management/config/)
 
 ### Use of AI
 
@@ -218,8 +210,8 @@ An AI assistant (Claude, via Claude Code) was used on this project for:
 * **scaffolding the repository**: the directory layout, the `Makefile`
   targets, and the first draft of the `Dockerfile`s, the entrypoint scripts,
   the nginx/php-fpm/MariaDB configuration files and `docker-compose.yml`;
-* **drafting the documentation**: this `README.md`, `USER_DOC.md` and
-  `DEV_DOC.md`.
+* **drafting the documentation**: this `README.md`, `USER_DOC.md`,
+  `DEV_DOC.md` and the Japanese notes under `docs/`.
 
 Every generated file was then read, tested and adjusted by hand — in
 particular the entrypoints (PID 1 behaviour, idempotency, secret handling),

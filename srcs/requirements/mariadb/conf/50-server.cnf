@@ -12,9 +12,9 @@ datadir                 = /var/lib/mysql
 tmpdir                  = /tmp
 lc-messages-dir         = /usr/share/mysql
 
-# Listen on every interface so the other containers of the docker network
-# (wordpress, adminer, backup) can reach the database. The port is never
-# published on the host: nginx:443 stays the only entrypoint.
+# Listen on every interface so the wordpress container can reach the database
+# over the docker network. The port is never published on the host:
+# nginx:443 stays the only entrypoint.
 bind-address            = 0.0.0.0
 port                    = 3306
 skip-name-resolve

@@ -1,7 +1,8 @@
-# Inception ナレッジ集（日本語）
+# Inception ナレッジ集（日本語）— 必須部分のみ
 
 > 本書はこのプロジェクトを理解し、**評価（defense）で説明できるようになる**ための背景知識をまとめたものです。
 > 実装そのものの仕様は [`SPEC.ja.md`](SPEC.ja.md) を参照してください。
+> このブランチは課題の**必須部分のみ**を実装しているため、ボーナス関連の記述は含みません。
 
 ---
 
@@ -19,13 +20,10 @@
 10. [php-fpm](#10-php-fpm)
 11. [MariaDB](#11-mariadb)
 12. [WordPress](#12-wordpress)
-13. [Redis とオブジェクトキャッシュ](#13-redis-とオブジェクトキャッシュ)
-14. [FTP（vsftpd）](#14-ftpvsftpd)
-15. [cron とバックアップ](#15-cron-とバックアップ)
-16. [評価（defense）想定質問集](#16-評価defense想定質問集)
-17. [トラブルシューティング](#17-トラブルシューティング)
-18. [用語集](#18-用語集)
-19. [参考資料](#19-参考資料)
+13. [評価（defense）想定質問集](#13-評価defense想定質問集)
+14. [トラブルシューティング](#14-トラブルシューティング)
+15. [用語集](#15-用語集)
+16. [参考資料](#16-参考資料)
 
 ---
 
@@ -43,7 +41,7 @@
 | 別 OS の実行 | 可能（Linux 上で Windows など） | 不可（ホストと同じカーネル） |
 | 分離の強度 | 強い（カーネルごと別） | 相対的に弱い（カーネルを共有） |
 
-**この課題での位置づけ**: VM は「学校のマシンからプロジェクトを隔離する」層、Docker は「サービス同士を隔離する」層です。8サービスを VM 8台で作るのは現実的ではありませんが、コンテナ8個なら小さな VM 1台に収まります。
+**この課題での位置づけ**: VM は「学校のマシンからプロジェクトを隔離する」層、Docker は「サービス同士を隔離する」層です。3サービスを VM 3台で作るのは現実的ではありませんが、コンテナ3個なら小さな VM 1台に収まります。
 
 ### 1.2 コンテナを支える Linux の機能
 
@@ -141,7 +139,7 @@ shell 形式では `sh` が PID 1 になり、`docker stop` の SIGTERM が ngin
 
 - ベースイメージ: `debian:bookworm`（コードネーム固定）
 - 自作イメージ: `nginx:inception` のように独自タグ
-- ダウンロードするもの: WordPress `6.7.1`、wp-cli `2.12.0`、Adminer `4.8.1` とバージョン固定
+- ダウンロードするもの: WordPress `6.7.1`、wp-cli `2.12.0` とバージョン固定
 
 ---
 
@@ -165,7 +163,7 @@ docker stop nginx
 
 PID 1 が SIGTERM を無視するプロセス（例: `sh`、`tail -f`）だと、毎回10秒待たされた挙句に強制終了されます。データベースであれば**書き込み途中で殺される**ことになり、破損の原因になります。
 
-対して nginx・mariadbd・php-fpm・redis-server・vsftpd・cron は SIGTERM ハンドラを実装しており、受け取ると接続を捌き切ってから安全に終了します（graceful shutdown）。だから**本体を PID 1 にする**必要があります。
+対して nginx・mariadbd・php-fpm は SIGTERM ハンドラを実装しており、受け取ると接続を捌き切ってから安全に終了します（graceful shutdown）。だから**本体を PID 1 にする**必要があります。
 
 ### 3.3 なぜ `tail -f` / `sleep infinity` / `while true` が禁止なのか
 
@@ -214,10 +212,6 @@ done
 | nginx | `nginx -g "daemon off;"` |
 | php-fpm | `php-fpm8.2 -F`（`--nodaemonize`） |
 | MariaDB | `mariadbd` を直接起動（`mysqld_safe` はラッパーなので使わない） |
-| Redis | `redis.conf` の `daemonize no` |
-| vsftpd | `-obackground=NO` または conf の `background=NO` |
-| cron | `cron -f` |
-| PHP ビルトインサーバ | `php -S`（元々フォアグラウンド） |
 
 ---
 
@@ -252,7 +246,7 @@ IP アドレスをハードコードする必要がなく、コンテナを作�
 | `expose: ["3306"]` | ドキュメント的宣言。**ホストには公開されない**。同一ネットワークのコンテナからは元々アクセス可能 |
 | `ports: ["443:443"]` | ホストのポートをコンテナへ**転送する**（外部から到達可能になる） |
 
-本プロジェクトでは `nginx` だけが `ports: ["443:443"]` を持ち、他は `expose` のみです（FTP はボーナス規定により追加公開）。
+本プロジェクトで `ports:` を持つのは `nginx` だけです。MariaDB と php-fpm は `expose` のみで、ホストからは到達できません。
 
 ### 4.4 なぜ `network: host` が禁止か
 
@@ -262,19 +256,6 @@ IP アドレスをハードコードする必要がなく、コンテナを作�
 - コンテナが開いたポートは即ホストのポート。`nginx が唯一の入口` という要件を技術的に保証できない。
 - サービス名での名前解決ができない（全部 `localhost`）。
 - 同じポートを使うコンテナを複数動かせない（MariaDB を2つ動かせないなど）。
-
-### 4.5 nginx の遅延名前解決
-
-nginx は起動時に `proxy_pass http://adminer:8080;` のホスト名を解決しようとし、解決できないと**起動に失敗**します。ボーナス無効時にこれが起きないよう、変数経由にしています。
-
-```nginx
-resolver 127.0.0.11 ipv6=off valid=10s;
-set $adminer_upstream http://adminer:8080;
-rewrite ^/adminer/(.*)$ /$1 break;
-proxy_pass $adminer_upstream;
-```
-
-`proxy_pass` に変数を使うと解決がリクエスト時に遅延します。ただし**変数形式では location のプレフィックスが自動で剥がれない**ため、`rewrite … break` でパスを整える必要があります（`/adminer/foo` → upstream には `/foo` を渡す）。
 
 ---
 
@@ -326,7 +307,7 @@ volumes:
 
 | ケース | 何が起きたか | 対処 |
 |---|---|---|
-| `mariadb` | `apt-get install mariadb-server` がイメージ内 `/var/lib/mysql` にシステムテーブルを作成 → 空ボリュームにコピーされる → entrypoint が「初期化済み」と誤判定し、DB もユーザーも作られない | Dockerfile 末尾で `rm -rf /var/lib/mysql/*` |
+| `mariadb` | `apt-get install mariadb-server` がイメージ内 `/var/lib/mysql` にシステムテーブルを作成 → 空のボリュームにコピーされる → entrypoint が「初期化済み」と誤判定し、DB もユーザーも作られない | Dockerfile 末尾で `rm -rf /var/lib/mysql/*` |
 | `nginx` | nginx パッケージの `/var/www/html/index.nginx-debian.html` が WordPress ボリュームにコピーされる | Dockerfile 末尾で `rm -rf /var/www/html/*` |
 
 **教訓**: ボリュームをマウントする予定のパスは、イメージ側では**空にしておく**。
@@ -380,8 +361,8 @@ services:
 
 | 種別 | 例 | 置き場所 |
 |---|---|---|
-| 設定（非機密） | `DOMAIN_NAME`, `MYSQL_DATABASE`, `MYSQL_USER`, `WP_ADMIN_USER`, `REDIS_HOST` | `srcs/.env` |
-| 秘密情報 | DB root / DB user / FTP / WordPress の各パスワード | `secrets/*.txt` |
+| 設定（非機密） | `DOMAIN_NAME`, `MYSQL_DATABASE`, `MYSQL_USER`, `WP_ADMIN_USER` | `srcs/.env` |
+| 秘密情報 | DB root / DB user / WordPress の各パスワード | `secrets/*.txt` |
 
 どちらも `.gitignore` で除外し、追跡されるのは機密を含まない `srcs/.env.example` だけです。
 
@@ -393,7 +374,7 @@ services:
 
 ### 7.1 役割
 
-複数コンテナの構成（イメージ、ネットワーク、ボリューム、依存関係、環境変数、再起動ポリシー）を**1つの YAML に宣言**し、`docker compose up` で一括構築します。手で `docker run` を8回打つのに比べ、再現性・可読性・変更容易性が段違いです。
+複数コンテナの構成（イメージ、ネットワーク、ボリューム、依存関係、環境変数、再起動ポリシー）を**1つの YAML に宣言**し、`docker compose up` で一括構築します。手で `docker run` を3回打つのに比べ、再現性・可読性・変更容易性が段違いです。
 
 ### 7.2 `.env` の読み込み順序
 
@@ -432,17 +413,6 @@ depends_on:
 | `unless-stopped` | `always` と同様だが、手動停止した状態は維持 |
 
 課題は「クラッシュ時に再起動すること」を要求しているため `always` を採用しています。
-
-### 7.5 プロファイル
-
-```yaml
-redis:
-  profiles: ["bonus"]
-```
-
-`--profile bonus` を付けたときだけ作成されるサービスです。これにより `make`（必須+ボーナス）と `make mandatory`（必須のみ）を同じ compose ファイルで切り替えられます。
-
-> **注意**: プロファイル無効なサービスに対して `depends_on` すると定義エラーになります。そのため nginx はボーナスコンテナに依存させず、DNS の遅延解決で対応しています。
 
 ---
 
@@ -558,18 +528,6 @@ location / {
 
 `/2026/08/hello-world/` のような URL は実ファイルではありません。ファイル → ディレクトリ → 見つからなければ `index.php` に投げる、という順で試すことで WordPress のパーマリンクが機能します。
 
-### 9.4 リバースプロキシ
-
-```nginx
-proxy_pass         http://adminer:8080;
-proxy_set_header   Host              $host;
-proxy_set_header   X-Real-IP         $remote_addr;
-proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
-proxy_set_header   X-Forwarded-Proto https;
-```
-
-`X-Forwarded-*` はバックエンドに「本来のクライアント情報」を伝えるための慣習的ヘッダです。これがないとバックエンドは全アクセスを nginx からのものだと認識します。
-
 ---
 
 ## 10. php-fpm
@@ -618,7 +576,7 @@ listen = 0.0.0.0:9000
 
 ### 10.4 `clear_env = no`
 
-php-fpm は既定でコンテナの環境変数をワーカーから隠します（`clear_env = yes`）。本プロジェクトは `wp-config.php` の中で `getenv('REDIS_HOST')` などを使うため `no` にしています。
+php-fpm は既定でコンテナの環境変数をワーカーから隠します（`clear_env = yes`）。本プロジェクトは `wp-config.php` の中で `getenv()` を使えるようにするため `no` にしています。
 
 ---
 
@@ -669,7 +627,7 @@ MySQL/MariaDB の `utf8` は**最大3バイト**しか扱えず、絵文字（4�
 
 ### 11.4 `MYSQL_HOST` 環境変数の罠
 
-MySQL/MariaDB のクライアントは**環境変数 `MYSQL_HOST` を既定の接続先として読みます**。本プロジェクトは `env_file` により全コンテナに `MYSQL_HOST=mariadb` が入るため、mariadb コンテナ内で
+MySQL/MariaDB のクライアントは**環境変数 `MYSQL_HOST` を既定の接続先として読みます**。本プロジェクトは `env_file` により `MYSQL_HOST=mariadb` が入るため、mariadb コンテナ内で
 
 ```sh
 docker exec mariadb mariadb -u root -p…      # ← 自分自身へ TCP 接続してしまう
@@ -680,10 +638,6 @@ docker exec mariadb mariadb -u root -p…      # ← 自分自身へ TCP 接続�
 ```sh
 docker exec -it mariadb mariadb -h localhost --protocol=socket -u root -p"$(cat secrets/db_root_password.txt)"
 ```
-
-### 11.5 論理バックアップと `--single-transaction`
-
-`mariadb-dump` は SQL 文の形でデータを書き出す**論理バックアップ**です。`--single-transaction` を付けると、InnoDB の MVCC を利用して**テーブルをロックせずに一貫したスナップショット**を取得できます（サービスを止めずにバックアップできる）。
 
 ---
 
@@ -710,8 +664,6 @@ docker exec -it mariadb mariadb -h localhost --protocol=socket -u root -p"$(cat 
 | `wp config create --dbname … --extra-php` | `wp-config.php` を生成（追加の PHP コードも埋め込める） |
 | `wp core install --url --title --admin_user …` | DB にテーブルを作り、管理者を作成 |
 | `wp user create <name> <email> --role --user_pass` | 2人目のユーザーを作成 |
-| `wp plugin install redis-cache --activate` | プラグイン導入 |
-| `wp redis enable` | オブジェクトキャッシュのドロップインを配置 |
 
 `--allow-root` は root で実行するため必要です（コンテナ内では通常 root）。
 
@@ -735,8 +687,6 @@ if (isset($_SERVER['HTTP_X_FORWARDED_PROTO'])
 |---|---|
 | `FS_METHOD = 'direct'` | プラグイン更新時に FTP 認証を求めず直接ファイル操作する |
 | `DISALLOW_FILE_EDIT = true` | 管理画面からのテーマ/プラグイン直接編集を禁止（乗っ取り時の被害を限定） |
-| `WP_REDIS_HOST` / `WP_REDIS_PORT` | オブジェクトキャッシュの接続先 |
-| `WP_CACHE_KEY_SALT` | キャッシュキーの名前空間（複数サイトでの衝突防止） |
 
 これらは `defined(...) or define(...)` で保護しています。wp-cli がこのブロックを2回評価するため、素の `define()` では `Constant already defined` 警告が出るからです。
 
@@ -753,115 +703,7 @@ esac
 
 ---
 
-## 13. Redis とオブジェクトキャッシュ
-
-### 13.1 WordPress のキャッシュ階層
-
-| 種類 | 内容 | 永続性 |
-|---|---|---|
-| オブジェクトキャッシュ | DB クエリ結果・オプション値などを保持 | 既定はリクエスト内のみ（**非永続**） |
-| ページキャッシュ | 生成済み HTML を保持 | プラグイン依存 |
-| ブラウザキャッシュ | 静的ファイル | `expires` ヘッダ |
-
-WordPress の既定のオブジェクトキャッシュは**リクエストが終わると消えます**。Redis を外部ストアにすると、リクエストをまたいでキャッシュが効き、DB へのクエリ数が大きく減ります。
-
-### 13.2 導入の仕組み
-
-`redis-cache` プラグインは `wp-content/object-cache.php`（ドロップイン）を配置します。WordPress はこのファイルがあると、既定の実装の代わりにこちらを使います。PHP 側には `php8.2-redis` 拡張（PhpRedis）が必要です。
-
-確認:
-
-```sh
-docker exec -it wordpress wp --allow-root --path=/var/www/html redis status
-# Status: Connected / Client: PhpRedis / Drop-in: Valid
-docker exec -it redis redis-cli dbsize
-```
-
-### 13.3 追い出しポリシー
-
-```
-maxmemory 256mb
-maxmemory-policy allkeys-lru
-```
-
-| ポリシー | 挙動 |
-|---|---|
-| `noeviction` | 上限到達で書き込みエラー（キャッシュ用途には不向き） |
-| `allkeys-lru` | 最も長く使われていないキーから削除（**キャッシュ用途の定番**） |
-| `volatile-lru` | TTL 付きのキーのみ LRU で削除 |
-
-キャッシュは「消えても再計算できるデータ」なので、上限を決めて古いものから捨てるのが正解です。
-
----
-
-## 14. FTP（vsftpd）
-
-### 14.1 アクティブとパッシブ
-
-| モード | データ接続の向き |
-|---|---|
-| アクティブ | **サーバ → クライアント**（クライアントの待ち受けポートへ接続） |
-| パッシブ | **クライアント → サーバ**（サーバが指定したポートへ接続） |
-
-NAT や Docker のポート転送の内側ではアクティブモードが機能しません。よってパッシブモードを使い、そのポート範囲（`21000-21010`）を明示的に公開します。`pasv_address` は「クライアントが接続し直すべきアドレス」で、Docker 越しではコンテナ IP ではなく**ホストのアドレス**を返す必要があります。
-
-### 14.2 chroot と権限
-
-| 設定 | 意味 |
-|---|---|
-| `chroot_local_user=YES` | ログイン後はホームより上に出られない |
-| `allow_writeable_chroot=YES` | chroot 先が書き込み可能でも起動を許可（本来 vsftpd は安全性のため拒否する） |
-| `local_root=/var/www/html` | ログイン直後の位置 |
-| `userlist_enable=YES` + `userlist_deny=NO` | 許可リスト方式（`ftpuser` の1名のみ） |
-| シェルは `/usr/sbin/nologin` | FTP はできるが SSH などでシェルは取れない |
-
-FTP ユーザーは `www-data` グループに追加し、`/var/www/html` にグループ書き込み権を与えることで WordPress ファイルを更新できます。
-
-### 14.3 注意点（実運用の観点）
-
-FTP は**認証情報もデータも平文**で流れます。課題のボーナスとしては要求どおりですが、実運用では SFTP / FTPS を選ぶべきです。評価でこの点に触れられると加点になります。
-
----
-
-## 15. cron とバックアップ
-
-### 15.1 cron が環境変数を継承しない
-
-cron はデーモンとして起動し、ジョブを**最小限の環境**で実行します。コンテナの環境変数（`MYSQL_HOST` など）はジョブに引き継がれません。そこで entrypoint がジョブファイル自体に変数を書き出します。
-
-```
-/etc/cron.d/inception-backup
-────────────────────────────
-MYSQL_HOST=mariadb
-MYSQL_PORT=3306
-MYSQL_DATABASE=wordpress
-MYSQL_USER=wp_user
-BACKUP_RETENTION_DAYS=7
-0 3 * * * root /usr/local/bin/backup.sh >> /proc/1/fd/1 2>&1
-```
-
-- `/etc/cron.d/` のファイルは**ユーザー名フィールドが必要**（`root`）。crontab 形式との違いに注意。
-- パーミッションは `0644` でなければ無視されます。
-- 出力を `/proc/1/fd/1` に流すことで `docker logs backup` から読めます。
-
-### 15.2 cron 式
-
-```
-分 時 日 月 曜日  ユーザー  コマンド
-0  3  *  *  *     root      /usr/local/bin/backup.sh
-```
-
-上記は「毎日 3:00」。
-
-### 15.3 「自由選択のサービス」として何を主張するか
-
-評価では選定理由の説明を求められます。要点:
-
-> ボリュームはコンテナの障害からデータを守るが、**論理的な破壊（誤った DELETE、テーブル破損、プラグインの暴走）からは守らない**。世代管理された論理バックアップを別ボリュームに持つことで、「どの時点にでも戻せる」という別種の保証を追加している。専用の Dockerfile・専用のボリューム・フォアグラウンドの cron という課題の作法にも合致する。
-
----
-
-## 16. 評価（defense）想定質問集
+## 13. 評価（defense）想定質問集
 
 ### Docker 全般
 
@@ -894,16 +736,16 @@ A. 当たらない。禁止されているのは「コンテナを生かし続�
 ### ネットワーク
 
 **Q. コンテナ同士はどうやって通信していますか。**
-A. `inception` というユーザー定義 bridge ネットワークを1つ作り、全コンテナを接続している。Docker 内蔵 DNS（127.0.0.11）がサービス名を解決するので、nginx は `wordpress:9000`、WordPress は `mariadb:3306` という名前で接続できる。IP のハードコードは不要。
+A. `inception` というユーザー定義 bridge ネットワークを1つ作り、3コンテナを接続している。Docker 内蔵 DNS（127.0.0.11）がサービス名を解決するので、nginx は `wordpress:9000`、WordPress は `mariadb:3306` という名前で接続できる。IP のハードコードは不要。
 
 **Q. なぜ `network: host` が禁止なのですか。**
 A. ネットワークの分離が消え、コンテナのポートがそのままホストのポートになるため「nginx が唯一の入口」を保証できなくなる。加えてサービス名の名前解決ができず、同じポートを使うコンテナを複数動かせない。
 
 **Q. `expose` と `ports` の違いは。**
-A. `expose` は宣言だけでホストには公開されない（同一ネットワークのコンテナからは元々到達できる）。`ports` はホストのポートを転送して外部から到達可能にする。このプロジェクトでは nginx の 443 だけが `ports`（FTP はボーナス規定で追加）。
+A. `expose` は宣言だけでホストには公開されない（同一ネットワークのコンテナからは元々到達できる）。`ports` はホストのポートを転送して外部から到達可能にする。このプロジェクトで `ports` を持つのは nginx の 443 だけ。
 
-**Q. Adminer と静的サイトはポートを開けていないのに、どうやって見えるのですか。**
-A. nginx が `/adminer/` と `/static/` をリバースプロキシしている。これにより「443 が唯一の入口」という必須要件を崩さずにボーナスを追加できる。
+**Q. MariaDB にホストから直接繋げますか。**
+A. 繋げない。`ports` を書いていないので 3306 はホストに公開されていない。確認するには `docker exec` でコンテナに入るか、同じネットワークのコンテナから接続する。
 
 ### ボリューム
 
@@ -918,6 +760,9 @@ A. 2段構え。(1) データは名前付きボリュームにあり `down` で�
 
 **Q. ボリュームの copy-up でハマったと聞きましたが。**
 A. `mariadb-server` パッケージがイメージ内 `/var/lib/mysql` にシステムテーブルを作るため、空のボリュームにその中身がコピーされ、entrypoint が「初期化済み」と誤判定して DB もユーザーも作られなかった。Dockerfile の最後で `rm -rf /var/lib/mysql/*` して空のデータディレクトリを出荷することで解決した。nginx の `/var/www/html` でも同じ対処をしている。
+
+**Q. なぜボリュームが2つ必要なのですか。**
+A. WordPress の状態は「コアファイルとアップロード（`/var/www/html`）」と「投稿・ユーザー・設定（データベース）」に分かれており、片方だけではサイトを復元できないから。課題もこの2つを別々のボリュームとして要求している。
 
 ### シークレット・環境変数
 
@@ -947,6 +792,9 @@ A. 実行していない。`.php` へのリクエストは FastCGI プロトコ�
 **Q. `fastcgi_param HTTPS on` は何のためですか。**
 A. TLS を終端しているのは nginx なので、php-fpm には平文のリクエストとして届く。これを渡さないと WordPress が「HTTPS なのに HTTP で来た」と判断してリダイレクトループを起こすことがある。
 
+**Q. nginx が WordPress のファイルを読めるのはなぜですか。**
+A. `wordpress` ボリュームを nginx にも `:ro`（読み取り専用）でマウントしているから。nginx は静的ファイルを直接返し、PHP のパスだけを php-fpm に渡す。書き込みは WordPress 側だけが行う。
+
 ### WordPress / DB
 
 **Q. WordPress のユーザーは誰と誰ですか。**
@@ -972,19 +820,20 @@ A. `depends_on` に `condition: service_healthy` を付け、MariaDB のヘル�
 **Q. コンテナが落ちたらどうなりますか。**
 A. 全サービスに `restart: always` を付けているので Docker が自動再起動する。entrypoint は冪等なので、再起動してもデータを壊さず途中から復帰する。
 
-**Q. ボーナス無しで動かせますか。**
-A. `make mandatory` で必須3サービスだけ起動できる。ボーナスは compose のプロファイル `bonus` に入れており、同時に `.env` の `ENABLE_BONUS=0` を設定して nginx が `/adminer/` `/static/` のルートを出力しないようにしている。
-
 **Q. ログはどう見ますか。**
-A. `make logs` で全体、`docker logs <service>` で個別。全サービスがログを標準出力/標準エラーに出すよう設定してある（MariaDB は `log_error` を未設定にし、php-fpm は `catch_workers_output`、Redis は `logfile ""`、vsftpd は `/proc/1/fd/1` へのシンボリックリンク）。
+A. `make logs` で全体、`docker logs <service>` で個別。全サービスがログを標準出力/標準エラーに出すよう設定してある（MariaDB は `log_error` を未設定にし、php-fpm は `catch_workers_output` を有効にしている）。
+
+**Q. Makefile は何をしていますか。**
+A. `docker compose` のラッパー。加えて `setup` でホストのデータディレクトリ作成・`.env` 生成・シークレット生成を冪等に行い、`hosts` で `/etc/hosts` にドメインを登録し、`clean` / `fclean` で削除の粒度を分けている。すべての操作が Makefile 経由で完結する。
 
 ---
 
-## 17. トラブルシューティング
+## 14. トラブルシューティング
 
 | 症状 | 主な原因 | 確認・対処 |
 |---|---|---|
 | `docker compose up` がボリューム作成で失敗 | `${DATA_PATH}` のディレクトリが無い | `make setup`（`dirs` が作成する） |
+| `env file srcs/.env not found` | `.env` が未生成 | `make setup` |
 | mariadb が再起動を繰り返す | データディレクトリの権限、または設定ファイルの誤り | `docker logs mariadb`。`/home/kkuramot/data/mariadb` の所有者を確認 |
 | WordPress が DB に繋がらない | ユーザーが作られていない（初期化スキップの誤判定） | `docker exec -it mariadb mariadb -h localhost --protocol=socket -u root -p… -e "SELECT user,host FROM mysql.user"`。`make fclean && make` で作り直す |
 | nginx が `unknown directive` で起動しない | nginx のバージョン差 | `docker logs nginx`。bookworm は 1.22 なので `http2 on;` は使えない |
@@ -992,16 +841,12 @@ A. `make logs` で全体、`docker logs <service>` で個別。全サービス�
 | `ERR_CONNECTION_REFUSED`（http://） | 80 番を開いていない | `https://` でアクセスする |
 | ドメインで開けない | `/etc/hosts` 未設定 | `make hosts` |
 | wp-admin でリダイレクトループ | HTTPS 判定の失敗 | `fastcgi_param HTTPS on;` と `wp-config.php` の `X-Forwarded-Proto` 判定を確認 |
-| redis が再起動ループ | `redis.conf` の行末コメント | コメントを独立行にする |
-| FTP が `530 Login incorrect` | PAM の `/etc/shells` 検査 | `/usr/sbin/nologin` を `/etc/shells` に追加 |
-| FTP でファイル一覧が出ない | パッシブポート範囲・`pasv_address` の不一致 | 公開ポート範囲と conf を一致させる。`FTP_PASV_ADDRESS` を確認 |
-| Adminer で接続できない | Server 欄に `localhost` を入れている | `mariadb` を指定する |
 | `docker exec mariadb mariadb …` が拒否される | `MYSQL_HOST` 環境変数により TCP 接続になっている | `-h localhost --protocol=socket` を付ける |
 | 変更が反映されない | 設定は COPY されているためイメージの再ビルドが必要 | `up -d --build <service>` |
 
 ---
 
-## 18. 用語集
+## 15. 用語集
 
 | 用語 | 意味 |
 |---|---|
@@ -1020,32 +865,23 @@ A. `make logs` で全体、`docker logs <service>` で個別。全サービス�
 | **SAN** | 証明書の Subject Alternative Name。現代のブラウザはここでホスト名を検証する |
 | **前方秘匿性 (PFS)** | 秘密鍵が漏れても過去の通信は復号できない性質。ECDHE により実現 |
 | **AEAD** | 暗号化と認証を同時に行う方式（AES-GCM, ChaCha20-Poly1305） |
-| **論理バックアップ** | SQL 文の形で出力するバックアップ（`mariadb-dump`） |
-| **物理バックアップ** | データファイルをそのままコピーするバックアップ |
-| **オブジェクトキャッシュ** | DB クエリ結果などをキーバリューで保持する仕組み |
-| **LRU** | Least Recently Used。最も長く使われていないものから捨てる方式 |
-| **ドロップイン** | WordPress が既定実装を差し替えるために読み込む特別なファイル（`object-cache.php` など） |
-| **パッシブモード** | FTP でデータ接続をクライアント側から張る方式 |
-| **chroot** | プロセスから見えるルートディレクトリを制限すること |
 | **冪等** | 何度実行しても結果が同じであること |
-| **プロファイル (Compose)** | 特定の指定時だけサービスを有効化する仕組み |
+| **ヘルスチェック** | コンテナ内でコマンドを定期実行し、サービスが使える状態かを判定する仕組み |
 
 ---
 
-## 19. 参考資料
+## 16. 参考資料
 
 ### 公式ドキュメント
 
 - [Docker Docs](https://docs.docker.com/) — Dockerfile / Compose / volumes / secrets / networks
 - [Dockerfile best practices](https://docs.docker.com/build/building/best-practices/)
 - [Compose file reference](https://docs.docker.com/reference/compose-file/)
-- [nginx documentation](https://nginx.org/en/docs/) — `ssl_protocols`, `fastcgi_pass`, `proxy_pass`, `resolver`
+- [nginx documentation](https://nginx.org/en/docs/) — `ssl_protocols`, `fastcgi_pass`
 - [MariaDB Knowledge Base](https://mariadb.com/kb/en/) — `mariadb-install-db`, `--bootstrap`, 権限管理
 - [PHP: FPM Configuration](https://www.php.net/manual/en/install.fpm.configuration.php)
 - [WP-CLI Handbook](https://make.wordpress.org/cli/handbook/)
 - [WordPress: Editing wp-config.php](https://wordpress.org/documentation/article/editing-wp-config-php/)
-- [Redis configuration](https://redis.io/docs/latest/operate/oss_and_stack/management/config/)
-- [vsftpd.conf(5)](https://security.appspot.com/vsftpd/vsftpd_conf.html)
 
 ### 設定生成・検証
 

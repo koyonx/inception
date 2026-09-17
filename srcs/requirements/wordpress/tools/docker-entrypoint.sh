@@ -5,7 +5,6 @@
 #    MariaDB to accept connections
 #  - downloads, configures and installs WordPress on the first run
 #  - creates the two required users (an administrator + a regular one)
-#  - enables the redis object cache when the bonus is on
 #  - then `exec php-fpm -F` => php-fpm is PID 1
 # =============================================================================
 set -eu
@@ -85,9 +84,6 @@ if [ ! -f "$WP_PATH/wp-config.php" ]; then
 			/* defined() guards: wp-cli evaluates this block twice */
 			defined('FS_METHOD')          or define('FS_METHOD', 'direct');
 			defined('DISALLOW_FILE_EDIT') or define('DISALLOW_FILE_EDIT', true);
-			defined('WP_REDIS_HOST')      or define('WP_REDIS_HOST', getenv('REDIS_HOST') ?: 'redis');
-			defined('WP_REDIS_PORT')      or define('WP_REDIS_PORT', (int) (getenv('REDIS_PORT') ?: 6379));
-			defined('WP_CACHE_KEY_SALT')  or define('WP_CACHE_KEY_SALT', getenv('DOMAIN_NAME') ?: 'inception');
 		PHP
 
 	log "installing WordPress at https://${DOMAIN_NAME}"
@@ -108,19 +104,6 @@ if [ ! -f "$WP_PATH/wp-config.php" ]; then
 	wp_run rewrite structure '/%postname%/' --hard
 else
 	log "WordPress is already installed, skipping the setup"
-fi
-
-# ---- redis object cache (bonus) --------------------------------------------
-if [ "${ENABLE_BONUS:-0}" = "1" ]; then
-	if ! wp_run plugin is-installed redis-cache > /dev/null 2>&1; then
-		log "installing the redis object cache plugin"
-		wp_run plugin install redis-cache --activate || \
-			log "WARNING: could not install redis-cache (no network?)"
-	fi
-	if wp_run plugin is-active redis-cache > /dev/null 2>&1; then
-		wp_run redis enable > /dev/null 2>&1 || \
-			log "WARNING: could not enable the redis object cache yet"
-	fi
 fi
 
 chown -R www-data:www-data "$WP_PATH"

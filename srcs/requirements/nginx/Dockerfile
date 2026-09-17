@@ -12,9 +12,8 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Both files are templates: ${DOMAIN_NAME} is substituted at container start.
+# The vhost is a template: ${DOMAIN_NAME} is substituted at container start.
 COPY conf/default.conf   /etc/nginx/templates/default.conf.template
-COPY conf/bonus.conf     /etc/nginx/templates/bonus.conf.template
 COPY tools/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh && \
