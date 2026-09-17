@@ -7,25 +7,14 @@ modify it. For the build and the internals, see [`DEV_DOC.md`](DEV_DOC.md).
 
 ## 1. What the stack provides
 
-Once started, the project runs a complete WordPress website behind HTTPS.
-
-### Mandatory services
+Once started, the project runs a complete WordPress website behind HTTPS with
+three containers — nothing more.
 
 | Container   | What it does                                          | How you reach it |
 |-------------|-------------------------------------------------------|------------------|
 | `nginx`     | The only entrypoint. Terminates TLS (TLSv1.2/1.3) on port 443 and forwards PHP to WordPress. | `https://kkuramot.42.fr` |
 | `wordpress` | WordPress + php-fpm. Generates the pages.             | through nginx only |
 | `mariadb`   | The database holding all the site content.            | through the other containers only |
-
-### Bonus services (started by `make`, skipped by `make mandatory`)
-
-| Container     | What it does                                            | How you reach it |
-|---------------|---------------------------------------------------------|------------------|
-| `redis`       | Object cache: WordPress stores query results in memory. | internal |
-| `ftp`         | Upload/download the website files with any FTP client.  | `ftp://<host-ip>:21` |
-| `adminer`     | Web interface to browse and edit the database.          | `https://kkuramot.42.fr/adminer/` |
-| `static-site` | A small static showcase page (HTML/CSS, no PHP).        | `https://kkuramot.42.fr/static/` |
-| `backup`      | Takes a compressed dump of the database every night.    | dumps in the `backup` volume |
 
 ---
 
@@ -49,7 +38,6 @@ downloads and installs itself. Follow it with `make logs`.
 | Goal                                   | Command        |
 |----------------------------------------|----------------|
 | Start everything                       | `make`         |
-| Start only the three mandatory services| `make mandatory` |
 | Stop and remove the containers (data kept) | `make down` |
 | Pause without removing                 | `make stop`    |
 | Resume                                 | `make start`   |
@@ -71,12 +59,10 @@ downloads and installs itself. Follow it with `make logs`.
 
 ## 3. Accessing the website and the admin panel
 
-| Page                | URL                                        |
-|---------------------|--------------------------------------------|
-| Website             | `https://kkuramot.42.fr`                    |
-| Administration      | `https://kkuramot.42.fr/wp-admin/`          |
-| Database manager    | `https://kkuramot.42.fr/adminer/` *(bonus)* |
-| Static showcase site| `https://kkuramot.42.fr/static/` *(bonus)*  |
+| Page                | URL                                |
+|---------------------|------------------------------------|
+| Website             | `https://kkuramot.42.fr`           |
+| Administration      | `https://kkuramot.42.fr/wp-admin/` |
 
 The certificate is **self-signed**, so the browser shows a warning the first
 time ("Your connection is not private"). This is expected: accept the
@@ -89,20 +75,6 @@ Two WordPress accounts are created automatically:
 * a **regular user** — `WP_USER` (`cobb` by default), created with the
   `author` role.
 
-For Adminer, log in with:
-
-| Field    | Value                                       |
-|----------|---------------------------------------------|
-| System   | MySQL / MariaDB                             |
-| Server   | `mariadb`                                   |
-| Username | the value of `MYSQL_USER` in `srcs/.env`    |
-| Password | the content of `secrets/db_password.txt`    |
-| Database | the value of `MYSQL_DATABASE`               |
-
-For FTP, connect to the host IP on port 21 with the user `FTP_USER`
-(`ftpuser`) and the password in `secrets/ftp_password.txt`. Use **passive
-mode**; the session lands directly in the WordPress files.
-
 ---
 
 ## 4. Where the credentials live
@@ -114,7 +86,6 @@ passwords the first time and stores them in `secrets/`, which git ignores:
 |---------------------------------|----------------------------------------------|
 | `secrets/db_root_password.txt`  | MariaDB `root` password                      |
 | `secrets/db_password.txt`       | password of the WordPress database user      |
-| `secrets/ftp_password.txt`      | password of the FTP user                     |
 | `secrets/credentials.txt`       | `WP_ADMIN_PASSWORD=…` and `WP_USER_PASSWORD=…` |
 
 Read them with:
@@ -135,9 +106,9 @@ Non-sensitive settings (domain name, user names, database name) are in
       user update <user> --user_pass='new-password'
   ```
   then update `secrets/credentials.txt` so it stays in sync.
-* **Database / FTP** — the passwords are only read when the data directory or
-  the user is created. Edit the file in `secrets/`, then recreate the affected
-  service (`make fclean && make` for the database — this erases the data).
+* **Database** — the passwords are only read when the data directory is
+  created. Edit the file in `secrets/`, then recreate the database
+  (`make fclean && make` — this erases the data).
 
 ---
 
@@ -147,7 +118,7 @@ Non-sensitive settings (domain name, user names, database name) are in
 make ps
 ```
 
-`nginx`, `wordpress` and `mariadb` must be `Up`, the first two also `(healthy)`.
+`nginx`, `wordpress` and `mariadb` must all be `Up (healthy)`.
 
 ```sh
 # the site answers over TLS

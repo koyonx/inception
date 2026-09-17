@@ -3,7 +3,6 @@
 #  NGINX entrypoint
 #  - generates the self-signed TLS certificate for ${DOMAIN_NAME}
 #  - renders the vhost template
-#  - enables the bonus routes only when ENABLE_BONUS=1
 #  - then `exec nginx -g "daemon off;"` => nginx is PID 1
 # =============================================================================
 set -eu
@@ -31,23 +30,11 @@ if [ ! -f "$CRT" ] || [ ! -f "$KEY" ]; then
 fi
 
 # ---- vhost ------------------------------------------------------------------
-mkdir -p /etc/nginx/conf.d/bonus
-rm -f /etc/nginx/conf.d/bonus/*.conf
-
 # Only ${DOMAIN_NAME} is substituted; nginx variables such as $uri or $host
 # are left untouched.
 envsubst '${DOMAIN_NAME}' \
 	< /etc/nginx/templates/default.conf.template \
 	> /etc/nginx/conf.d/default.conf
-
-if [ "${ENABLE_BONUS:-0}" = "1" ]; then
-	log "bonus routes enabled (/adminer/ and /static/)"
-	envsubst '${DOMAIN_NAME}' \
-		< /etc/nginx/templates/bonus.conf.template \
-		> /etc/nginx/conf.d/bonus/bonus.conf
-else
-	log "bonus routes disabled"
-fi
 
 # ---- sanity check then hand over to nginx -----------------------------------
 nginx -t
