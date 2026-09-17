@@ -344,6 +344,8 @@ chown -R mysql:mysql /var/run/mysqld /var/lib/mysql
               --skip-test-db --auth-root-authentication-method=normal
      4-2. mariadbd --user=mysql --bootstrap <<SQL
               ALTER USER 'root'@'localhost' IDENTIFIED BY '<root pw>';
+              DELETE FROM mysql.global_priv
+                 WHERE User='root' AND Host<>'localhost';    -- パスワード無し root を削除
               DELETE FROM mysql.global_priv WHERE User='';   -- 匿名ユーザー削除
               DROP DATABASE IF EXISTS test;
               CREATE DATABASE IF NOT EXISTS `wordpress` CHARACTER SET utf8mb4 …;
@@ -360,6 +362,9 @@ chown -R mysql:mysql /var/run/mysqld /var/lib/mysql
 権限設計:
 
 - `root` は `localhost` のみ（UNIX ソケット経由）。ネットワーク越しの root ログインは不可。
+- **`mariadb-install-db` は `root@127.0.0.1` / `root@::1` / `root@<hostname>` を
+  パスワード無しで作ります**。そのままだとコンテナ内からパスワード無しで root に
+  入れてしまうため、bootstrap で `localhost` 以外の root を削除しています。
 - `wp_user@'%'` は `wordpress` データベースに対してのみ全権。他 DB には触れません。
 
 ### 5.2 wordpress（WordPress + php-fpm）
@@ -796,6 +801,8 @@ make fclean && make    # すべて消去して新規インストール
 | Dockerfile 内のパスワード | **一切なし**（`ARG` や `ENV` にも渡さない） |
 | リポジトリ | `secrets/*.txt` と `srcs/.env` を `.gitignore` で除外。追跡されるのは `.env.example`（機密なし）のみ |
 | DB の露出 | 3306 はホストに公開せず `expose` のみ。root はネットワーク越しにログイン不可 |
+| DB の root アカウント | `root@localhost`（パスワード付き）だけを残し、`mariadb-install-db` が作るパスワード無しの `root@127.0.0.1` / `root@::1` / `root@<hostname>` は初期化時に削除 |
+| DB の不要な入口 | 匿名ユーザーと `test` データベースを初期化時に削除 |
 | WordPress 管理者名 | `admin` / `administrator` を含む名前を entrypoint が拒否 |
 | ファイル編集 | `DISALLOW_FILE_EDIT=true`（管理画面からのテーマ/プラグイン直接編集を禁止） |
 | 設定ファイルの保護 | nginx が `wp-config.php` とドットファイルへのアクセスを `deny all` |
@@ -918,6 +925,7 @@ Docker 28.5.1 上でゼロから構築して確認済み。
 | redis が設定エラーで再起動ループ | 行末コメントが不許可 | コメントを独立行へ |
 | FTP が `500 OOPS: failed to open vsftpd log file` | vsftpd は `/dev/stdout` を直接開けない | `/var/log/vsftpd.log` を `/proc/1/fd/1` へシンボリックリンク |
 | FTP が `530 Login incorrect` | PAM が `/etc/shells` に無いシェルのアカウントを拒否 | `/usr/sbin/nologin` を `/etc/shells` に追記 |
+| パスワード無しで root ログインできる | `mariadb-install-db` が `root@127.0.0.1` / `root@::1` / `root@<hostname>` を無認証で作る | bootstrap で `localhost` 以外の root を削除 |
 
 ---
 
