@@ -641,7 +641,9 @@ php-fpm は既定でコンテナの環境変数をワーカーから隠します
 
 ```sql
 ALTER USER 'root'@'localhost' IDENTIFIED BY '<root password>';
-DELETE FROM mysql.global_priv WHERE User='';        -- 匿名ユーザーを削除
+DELETE FROM mysql.global_priv
+   WHERE User='root' AND Host<>'localhost';          -- パスワード無しの root を削除
+DELETE FROM mysql.global_priv WHERE User='';         -- 匿名ユーザーを削除
 DROP DATABASE IF EXISTS test;                        -- テスト用 DB を削除
 CREATE DATABASE IF NOT EXISTS `wordpress` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS 'wp_user'@'%' IDENTIFIED BY '<db password>';
@@ -652,11 +654,14 @@ FLUSH PRIVILEGES;
 | 設計 | 理由 |
 |---|---|
 | `root@'localhost'` のみ | ネットワーク越しの root ログインを不可能にする |
+| `localhost` 以外の root を削除 | `mariadb-install-db` は `root@127.0.0.1` / `root@::1` / `root@<hostname>` を**パスワード無し**で作る。放置するとコンテナ内から `mariadb -h 127.0.0.1 -u root` で無認証ログインできてしまう |
 | `wp_user@'%'` | コンテナの IP は毎回変わるためホスト指定はワイルドカード |
 | 権限は `wordpress`.* のみ | 最小権限。他 DB には触れない |
 | 匿名ユーザー削除・test DB 削除 | 既定で作られる不要な入口を塞ぐ |
 
 > MariaDB 10.4 以降、ユーザー情報は `mysql.user`（ビュー）ではなく **`mysql.global_priv`** テーブルが実体です。
+> ここでやっていることは `mysql_secure_installation` が対話的に行う処理と同じで、
+> それを初期化時に一度だけ、非対話で適用しています。
 
 ### 11.3 `utf8mb4` を使う理由
 
@@ -955,6 +960,9 @@ A. `mariadbd --bootstrap` を使っているから。標準入力から SQL を�
 
 **Q. root ユーザーの権限は。**
 A. `root@'localhost'` のみで、ネットワーク越しにはログインできない。アプリケーションが使うのは `wp_user@'%'` で、権限は `wordpress` データベースに限定している。匿名ユーザーと `test` データベースも初期化時に削除している。
+
+**Q. パスワード無しの root が残っていませんか。**
+A. 残らないようにしている。`mariadb-install-db` は `root@localhost` のほかに `root@127.0.0.1`・`root@::1`・`root@<hostname>` を**パスワード無し・認証プラグイン無し**で作るため、放置するとコンテナ内から `mariadb -h 127.0.0.1 -u root` で無認証ログインできてしまう。実際に一度その状態を作って確認したうえで、bootstrap SQL に `DELETE FROM mysql.global_priv WHERE User='root' AND Host<>'localhost';` を入れて塞いだ。`mysql_secure_installation` が対話的にやることを、初期化時に非対話で適用している形。
 
 ### Compose / 運用
 

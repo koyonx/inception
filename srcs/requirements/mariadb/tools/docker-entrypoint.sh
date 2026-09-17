@@ -43,6 +43,13 @@ if [ ! -d "$DATADIR/mysql" ]; then
 		FLUSH PRIVILEGES;
 
 		ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}';
+
+		-- mariadb-install-db also creates root@127.0.0.1, root@::1 and
+		-- root@<hostname> with NO password at all. Keep only root@localhost,
+		-- which is reachable through the unix socket and now has a password.
+		DELETE FROM mysql.global_priv WHERE User='root' AND Host<>'localhost';
+
+		-- Anonymous users and the test database are entry points we do not want.
 		DELETE FROM mysql.global_priv WHERE User='';
 		DROP DATABASE IF EXISTS test;
 
